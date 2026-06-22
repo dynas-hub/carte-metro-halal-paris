@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Carte — Lignes de Métro & Boucheries Halal (Paris)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #map { position: absolute; inset: 0; }
+  .panel {
+    position: absolute; z-index: 1000; top: 12px; left: 12px; right: 12px;
+    max-width: 460px; background: #fff; border-radius: 12px; padding: 12px 14px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.18); font-size: 14px;
+  }
+  .panel h1 { font-size: 16px; margin: 0 0 8px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row input[type=text] { flex: 1 1 160px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
+  .row button { padding: 8px 12px; border: 0; border-radius: 8px; background: #2b6cb0; color: #fff; cursor: pointer; font-size: 14px; }
+  .row button.secondary { background: #4a5568; }
+  .row button:hover { filter: brightness(1.08); }
+  .toggles { margin-top: 8px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .toggles label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .status { margin-top: 8px; color: #555; min-height: 18px; }
+  .hint { margin-top: 6px; color: #777; font-size: 12px; }
+  .legend {
+    position: absolute; z-index: 1000; bottom: 18px; left: 12px;
+    background: #fff; border-radius: 12px; padding: 10px 12px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.18); font-size: 13px;
+    max-height: 55vh; overflow: auto; max-width: 240px;
+  }
+  .legend h2 { font-size: 13px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; color: #444; }
+  .legend .item { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .legend .badge {
+    min-width: 20px; height: 20px; padding: 0 4px; border-radius: 10px; color: #fff; font-weight: 700;
+    font-size: 11px; display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.15);
+  }
+  .legend .halal-key { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee; }
+  .legend .halal-dot { width: 14px; height: 14px; border-radius: 50%; background: #e53e3e; border: 2px solid #fff; box-shadow: 0 0 0 1.5px #b71c1c; }
+  .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
+  .leaflet-popup-content b { font-size: 14px; }
+  a.dir { display: inline-block; margin-top: 6px; color: #2b6cb0; }
+  .pin-actions button { margin-top: 6px; padding: 5px 9px; border: 0; border-radius: 6px; background: #c53030; color:#fff; cursor:pointer; font-size:12px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="panel">
+  <h1>🚇 Lignes de métro &amp; 🥩 Boucheries halal — Paris</h1>
+  <div class="row">
+    <input id="search" type="text" placeholder="Adresse (ex: 12 rue de Rivoli, Paris)…" />
+    <button id="go">Marquer 📍</button>
+    <button id="locate" class="secondary">Moi</button>
+  </div>
+  <div class="toggles">
+    <label><input type="checkbox" id="t-metro" checked /> Lignes de métro</label>
+    <label><input type="checkbox" id="t-halal" checked /> Boucheries halal</label>
+    <button id="recenter" class="secondary" style="padding:4px 10px;border:0;border-radius:8px;background:#4a5568;color:#fff;cursor:pointer;font-size:13px;">Recentrer Paris</button>
+  </div>
+  <div class="status" id="status">Chargement…</div>
+  <div class="hint">💡 Cliquez n'importe où sur la carte pour y poser un repère.</div>
+</div>
+
+<div class="legend" id="legend" style="display:none">
+  <h2>Lignes de métro</h2>
+  <div id="legend-lines"></div>
+  <div class="halal-key"><i class="halal-dot"></i> Boucherie halal</div>
+</div>
+
+<!-- Données Paris figées en local (téléchargées depuis OpenStreetMap) : aucun serveur requis -->
+<script src="paris-metro.js"></script>
+<script src="paris-halal.js"></script>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+function showFatal(msg){ const el=document.getElementById('status'); if(el){el.textContent='❌ '+msg; el.style.color='#c00';} console.error('[carte] ERREUR:', msg); }
+window.addEventListener('error', e => showFatal((e.message||e.error)+(e.filename?' @ '+e.filename.split('/').pop()+':'+e.lineno:'')));
+if (typeof L === 'undefined') { showFatal("Leaflet n'a pas pu se charger (connexion / bloqueur ?)."); throw new Error('Leaflet manquant'); }
+
+const PARIS_CENTER = [48.8566, 2.3522], PARIS_ZOOM = 12;
+const map = L.map('map').setView(PARIS_CENTER, PARIS_ZOOM);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+}).addTo(map);
+
+const metroLayer = L.layerGroup().addTo(map);
+const halalLayer = L.layerGroup().addTo(map);
+let searchPin = null;
+
+const statusEl = document.getElementById('status');
+const legendBox = document.getElementById('legend');
+const legendLines = document.getElementById('legend-lines');
+const tMetro = document.getElementById('t-metro');
+const tHalal = document.getElementById('t-halal');
+const lineLegend = new Map();
+function log(...a){ console.log('[carte]', ...a); }
+
+// ---- Couleurs ----
+const FALLBACK = ['#e6194B','#3cb44b','#ffe119','#4363d8','#f58231','#911eb4','#42d4f4','#f032e6',
+  '#bfef45','#fabed4','#469990','#dcbeff','#9A6324','#800000','#808000','#000075','#a9a9a9'];
+function hashColor(k){ let h=0; for(let i=0;i<k.length;i++) h=(h*31+k.charCodeAt(i))>>>0; return FALLBACK[h%FALLBACK.length]; }
+function normColour(c,k){ if(!c) return hashColor(k||'x'); c=c.trim();
+  if(/^[0-9a-fA-F]{6}$/.test(c)) return '#'+c; if(/^#[0-9a-fA-F]{3,6}$/.test(c)) return c; return c; }
+function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function dirLink(lat,lon){return `<a class="dir" target="_blank" rel="noopener" href="https://www.openstreetmap.org/directions?to=${lat}%2C${lon}">Itinéraire ↗</a>`;}
+
+// ---- Lignes de métro (données locales) ----
+function drawMetro(elements) {
+  const wayGeom = new Map();
+  for (const el of elements) if (el.type==='way' && el.geometry && el.geometry.length>1) wayGeom.set(el.id, el.geometry);
+  metroLayer.clearLayers(); lineLegend.clear();
+  let segments = 0;
+  for (const el of elements) {
+    if (el.type !== 'relation') continue;
+    const t = el.tags || {};
+    const ref = t.ref || (t.name||'').replace(/^.*\b(M|Métro|Line|Ligne)\s*/i,'') || '?';
+    const colour = normColour(t.colour, ref);
+    if (!lineLegend.has(ref)) lineLegend.set(ref, { ref, name:'Ligne '+ref, colour });
+    const popup = `<b>${escapeHtml(t.name||('Ligne '+ref))}</b>` + (t.from&&t.to?`<br>${escapeHtml(t.from)} → ${escapeHtml(t.to)}`:'');
+    for (const m of (el.members||[])) {
+      if (m.type !== 'way') continue;
+      const g = wayGeom.get(m.ref); if (!g) continue;
+      L.polyline(g.map(p=>[p.lat,p.lon]), { color:colour, weight:4.5, opacity:0.9 }).bindPopup(popup).addTo(metroLayer);
+      segments++;
+    }
+  }
+  buildLegend();
+  log('métro :', lineLegend.size, 'lignes,', segments, 'tronçons tracés');
+  return lineLegend.size;
+}
+function buildLegend() {
+  const items = [...lineLegend.values()].sort((a,b)=>{ const na=parseFloat(a.ref),nb=parseFloat(b.ref);
+    if(!isNaN(na)&&!isNaN(nb)) return na-nb; return String(a.ref).localeCompare(String(b.ref)); });
+  legendLines.innerHTML = items.map(l=>`<div class="item"><span class="badge" style="background:${l.colour}">${escapeHtml(String(l.ref))}</span><span>${escapeHtml(l.name)}</span></div>`).join('')
+    || '<div style="color:#888">Aucune ligne.</div>';
+  legendBox.style.display = items.length ? 'block' : 'none';
+}
+
+// ---- Boucheries halal (données locales) ----
+function drawHalal(elements) {
+  halalLayer.clearLayers();
+  let n = 0;
+  for (const el of elements) {
+    const lat = el.lat ?? el.center?.lat, lon = el.lon ?? el.center?.lon;
+    if (lat == null) continue;
+    const t = el.tags || {};
+    const name = escapeHtml(t.name || 'Boucherie halal');
+    let addr = [t['addr:housenumber'], t['addr:street']].filter(Boolean).join(' ');
+    if (t['addr:city']) addr += (addr?', ':'') + t['addr:city'];
+    let html = `<b>${name}</b><br>🥩 Boucherie halal`;
+    if (addr) html += `<br>📍 ${escapeHtml(addr)}`;
+    if (t.opening_hours) html += `<br>🕒 ${escapeHtml(t.opening_hours)}`;
+    const phone = t.phone || t['contact:phone'];
+    if (phone) html += `<br>📞 <a href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a>`;
+    html += '<br>' + dirLink(lat, lon);
+    L.circleMarker([lat, lon], { radius:7, color:'#b71c1c', weight:2, fillColor:'#e53e3e', fillOpacity:0.95 })
+      .bindPopup(html).addTo(halalLayer);
+    n++;
+  }
+  log('halal :', n, 'boucheries tracées');
+  return n;
+}
+
+// ---- Repère d'adresse (comme Maps) ----
+function placePin(lat, lon, label) {
+  if (searchPin) map.removeLayer(searchPin);
+  searchPin = L.marker([lat, lon], { draggable: true }).addTo(map);
+  const body = (l) => `<b>📍 Repère</b>` + (l?`<br>${escapeHtml(l)}`:'') +
+    `<br>${(+lat).toFixed(5)}, ${(+lon).toFixed(5)}<br>${dirLink(lat,lon)}` +
+    `<div class="pin-actions"><button onclick="removePin()">Retirer le repère</button></div>`;
+  searchPin.bindPopup(body(label)).openPopup();
+  searchPin.on('dragend', () => { const p=searchPin.getLatLng(); lat=p.lat; lon=p.lng; searchPin.getPopup().setContent(body('')); });
+}
+function removePin(){ if(searchPin){ map.removeLayer(searchPin); searchPin=null; } }
+window.removePin = removePin;
+map.on('click', e => placePin(e.latlng.lat, e.latlng.lng, 'Point sélectionné'));
+
+// Recherche d'adresse (Nominatim)
+async function doSearch() {
+  const q = document.getElementById('search').value.trim();
+  if (!q) return;
+  statusEl.textContent = '🔎 Recherche de « ' + q + ' »…';
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`, { headers:{'Accept-Language':'fr'} });
+    const arr = await res.json();
+    if (!arr[0]) { statusEl.textContent = 'Adresse introuvable.'; return; }
+    const r = arr[0]; map.setView([+r.lat,+r.lon], 16); placePin(+r.lat,+r.lon, r.display_name);
+    statusEl.textContent = '📍 ' + r.display_name;
+  } catch { statusEl.textContent = 'Erreur de recherche (connexion ?).'; }
+}
+document.getElementById('go').addEventListener('click', doSearch);
+document.getElementById('search').addEventListener('keydown', e => { if(e.key==='Enter') doSearch(); });
+
+document.getElementById('locate').addEventListener('click', () => {
+  if (!navigator.geolocation) { statusEl.textContent='Géolocalisation non supportée.'; return; }
+  statusEl.textContent = '📍 Localisation…';
+  navigator.geolocation.getCurrentPosition(
+    p => { map.setView([p.coords.latitude,p.coords.longitude],16); placePin(p.coords.latitude,p.coords.longitude,'Ma position'); },
+    () => { statusEl.textContent='Impossible de vous localiser.'; });
+});
+
+document.getElementById('recenter').addEventListener('click', () => map.setView(PARIS_CENTER, PARIS_ZOOM));
+
+// Toggles
+tMetro.addEventListener('change', () => { tMetro.checked?metroLayer.addTo(map):map.removeLayer(metroLayer); legendBox.style.display=(tMetro.checked&&lineLegend.size)?'block':'none'; });
+tHalal.addEventListener('change', () => tHalal.checked?halalLayer.addTo(map):map.removeLayer(halalLayer));
+
+// ---- Initialisation à partir des données locales ----
+(function init() {
+  if (!window.PARIS_METRO || !window.PARIS_HALAL) {
+    showFatal("Données locales introuvables (paris-metro.js / paris-halal.js doivent être dans le même dossier).");
+    return;
+  }
+  const nLines = drawMetro(window.PARIS_METRO.elements);
+  const nHalal = drawHalal(window.PARIS_HALAL.elements);
+  statusEl.textContent = `🚇 ${nLines} lignes  ·  🥩 ${nHalal} boucheries halal`;
+})();
+</script>
+</body>
+</html>
