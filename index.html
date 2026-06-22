@@ -14,7 +14,10 @@
     max-width: 460px; background: #fff; border-radius: 12px; padding: 12px 14px;
     box-shadow: 0 4px 18px rgba(0,0,0,.18); font-size: 14px;
   }
-  .panel h1 { font-size: 16px; margin: 0 0 8px; }
+  .panel h1 { font-size: 16px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+  .panel h1 #collapse { margin-left: auto; border: 0; background: #edf2f7; color: #2d3748; border-radius: 8px; width: 30px; height: 30px; font-size: 14px; cursor: pointer; flex: 0 0 auto; }
+  .panel.collapsed .collapsible { display: none; }
+  .panel.collapsed h1 { margin: 0; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .row input[type=text] { flex: 1 1 160px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
   .row button { padding: 8px 12px; border: 0; border-radius: 8px; background: #2b6cb0; color: #fff; cursor: pointer; font-size: 14px; }
@@ -43,13 +46,29 @@
   .leaflet-popup-content b { font-size: 14px; }
   a.dir { display: inline-block; margin-top: 6px; color: #2b6cb0; }
   .pin-actions button { margin-top: 6px; padding: 5px 9px; border: 0; border-radius: 6px; background: #c53030; color:#fff; cursor:pointer; font-size:12px; }
+
+  /* ---- Mobile ---- */
+  @media (max-width: 640px) {
+    .panel { top: 6px; left: 6px; right: 6px; max-width: none; padding: 8px 10px; font-size: 13px; }
+    .panel h1 { font-size: 14px; margin-bottom: 6px; }
+    .row input[type=text] { font-size: 16px; }           /* >=16px : évite le zoom auto iOS */
+    .row button { padding: 9px 12px; }
+    .toggles { gap: 10px; }
+    .legend { bottom: 8px; left: 8px; max-width: 46vw; max-height: 38vh; padding: 8px 9px; font-size: 11px; }
+    .legend h2 { font-size: 11px; margin-bottom: 5px; }
+    .legend .badge { min-width: 18px; height: 18px; font-size: 10px; }
+    .leaflet-popup-content { font-size: 13px; }
+  }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
 <div class="panel">
-  <h1>🚇 Lignes de métro &amp; 🥩 Boucheries halal — Paris</h1>
+  <h1>🚇 Métro &amp; 🥩 Boucheries halal — Paris
+    <button id="collapse" title="Replier / déplier">▲</button>
+  </h1>
+  <div class="collapsible">
   <div class="row">
     <input id="search" type="text" placeholder="Adresse (ex: 12 rue de Rivoli, Paris)…" />
     <button id="go">Marquer 📍</button>
@@ -62,6 +81,7 @@
   </div>
   <div class="status" id="status">Chargement…</div>
   <div class="hint">💡 Cliquez n'importe où sur la carte pour y poser un repère.</div>
+  </div><!-- /collapsible -->
 </div>
 
 <div class="legend" id="legend" style="display:none">
@@ -82,7 +102,8 @@ window.addEventListener('error', e => showFatal((e.message||e.error)+(e.filename
 if (typeof L === 'undefined') { showFatal("Leaflet n'a pas pu se charger (connexion / bloqueur ?)."); throw new Error('Leaflet manquant'); }
 
 const PARIS_CENTER = [48.8566, 2.3522], PARIS_ZOOM = 12;
-const map = L.map('map').setView(PARIS_CENTER, PARIS_ZOOM);
+const map = L.map('map', { zoomControl: false }).setView(PARIS_CENTER, PARIS_ZOOM);
+L.control.zoom({ position: 'topright' }).addTo(map);   // zoom à droite : plus caché par le panneau
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 }).addTo(map);
@@ -204,6 +225,16 @@ document.getElementById('locate').addEventListener('click', () => {
 });
 
 document.getElementById('recenter').addEventListener('click', () => map.setView(PARIS_CENTER, PARIS_ZOOM));
+
+// Replier / déplier le panneau (utile sur téléphone)
+const panelEl = document.querySelector('.panel');
+const collapseBtn = document.getElementById('collapse');
+collapseBtn.addEventListener('click', () => {
+  panelEl.classList.toggle('collapsed');
+  collapseBtn.textContent = panelEl.classList.contains('collapsed') ? '▼' : '▲';
+});
+// Sur petit écran, on démarre replié pour laisser voir la carte
+if (window.matchMedia('(max-width: 640px)').matches) { panelEl.classList.add('collapsed'); collapseBtn.textContent = '▼'; }
 
 // Toggles
 tMetro.addEventListener('change', () => { tMetro.checked?metroLayer.addTo(map):map.removeLayer(metroLayer); legendBox.style.display=(tMetro.checked&&lineLegend.size)?'block':'none'; });
